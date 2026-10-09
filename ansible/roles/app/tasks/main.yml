@@ -1,0 +1,14 @@
+---
+- name: Run backend API
+  community.docker.docker_container:
+    name: "{{ api_container }}"
+    image: "{{ dockerhub_user }}/{{ api_image }}:latest"
+    pull: true
+    restart_policy: always
+    networks:
+      - name: app-network
+    env:
+      DATABASE_HOST: "{{ db_container }}"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://{{ db_container }}:5432/{{ db_name }}"
+      SPRING_DATASOURCE_USERNAME: "{{ db_user }}"
+      SPRING_DATASOURCE_PASSWORD: "{{ db_password }}"

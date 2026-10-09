@@ -154,3 +154,148 @@ ansible all -i inventories/setup.yml -m command -a "docker --version" --become
 ```
 
 Relancé une seconde fois, le playbook renvoie `changed=0` : le rôle est entièrement idempotent.
+
+## 3-3 Déploiement de l'application avec docker_container
+
+### Structure
+
+```
+ansible/
+├── inventories/
+│   └── setup.yml
+├── playbook.yml
+└── roles/
+    ├── docker/
+    ├── network/
+    ├── database/
+    ├── app/
+    └── proxy/
+```
+
+Chaque partie de l'application a son propre rôle, ce qui permet de les faire évoluer ou de les réutiliser séparément.
+
+### `playbook.yml`
+
+```yaml
+- hosts: all
+  gather_facts: true
+  become: true
+  roles:
+    - docker
+
+- hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    ansible_python_interpreter: /opt/docker_venv/bin/python
+    dockerhub_user: nicolases
+    db_image: tp-devops-database
+    api_image: tp-devops-simple-api
+    httpd_image: tp-devops-httpd
+    db_container: database
+    api_container: simple-api
+    db_name: db
+    db_user: usr
+    db_password: pwd
+  roles:
+    - network
+    - database
+    - app
+    - proxy
+```
+
+Le playbook est découpé en deux plays :
+
+- le premier installe Docker avec le Python système, nécessaire au module `apt` ;
+- le second utilise `ansible_python_interpreter: /opt/docker_venv/bin/python`, car les modules `community.docker` ont besoin du SDK Python `docker`, installé dans le venv.
+
+Toutes les valeurs (images, noms de conteneurs, identifiants) sont centralisées dans `vars` et réutilisées dans les rôles avec la syntaxe Jinja2 `{{ variable }}`.
+
+### Rôle `network`
+
+```yaml
+- name: Create app network
+  community.docker.docker_network:
+    name: app-network
+```
+
+Crée un réseau Docker dédié. Les conteneurs connectés à ce réseau se joignent par leur nom (DNS interne de Docker) : l'API contacte `database`, le proxy contacte `simple-api`.
+
+### Rôle `database`
+
+```yaml
+- name: Run database
+  community.docker.docker_container:
+    name: "{{ db_container }}"
+    image: "{{ dockerhub_user }}/{{ db_image }}:latest"
+    pull: true
+    restart_policy: always
+    networks:
+      - name: app-network
+    env:
+      POSTGRES_DB: "{{ db_name }}"
+      POSTGRES_USER: "{{ db_user }}"
+      POSTGRES_PASSWORD: "{{ db_password }}"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+```
+
+### Rôle `app`
+
+```yaml
+- name: Run backend API
+  community.docker.docker_container:
+    name: "{{ api_container }}"
+    image: "{{ dockerhub_user }}/{{ api_image }}:latest"
+    pull: true
+    restart_policy: always
+    networks:
+      - name: app-network
+    env:
+      DATABASE_HOST: "{{ db_container }}"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://{{ db_container }}:5432/{{ db_name }}"
+      SPRING_DATASOURCE_USERNAME: "{{ db_user }}"
+      SPRING_DATASOURCE_PASSWORD: "{{ db_password }}"
+```
+
+### Rôle `proxy`
+
+```yaml
+- name: Run httpd proxy
+  community.docker.docker_container:
+    name: httpd
+    image: "{{ dockerhub_user }}/{{ httpd_image }}:latest"
+    pull: true
+    restart_policy: always
+    networks:
+      - name: app-network
+    published_ports:
+      - "80:80"
+```
+
+### Paramètres utilisés
+
+| Paramètre | Rôle |
+|---|---|
+| `name` | Nom du conteneur, utilisé aussi comme nom d'hôte sur le réseau Docker. `simple-api` doit correspondre au `ProxyPass` du `httpd.conf`, `database` à l'hôte de l'URL JDBC |
+| `image` | Image publiée sur DockerHub par la CI du TP 2 |
+| `pull: true` | Télécharge toujours la dernière version de l'image, ce qui permet de redéployer après un nouveau push |
+| `restart_policy: always` | Redémarre le conteneur après un crash ou un reboot du serveur |
+| `networks` | Connecte le conteneur au réseau `app-network` |
+| `env` | Variables d'environnement. Pour la base, elles initialisent PostgreSQL. Pour l'API, `DATABASE_HOST` et `SPRING_DATASOURCE_*` surchargent les valeurs de `application.yml` sans reconstruire l'image |
+| `volumes` | Volume nommé `db-data` pour que les données survivent à la recréation du conteneur |
+| `published_ports` | Expose le port 80 du serveur. Seul le proxy publie un port : la base et l'API ne sont accessibles qu'à travers le réseau interne, ce qui réduit la surface d'attaque |
+
+### Vérification
+
+```bash
+ansible all -i inventories/setup.yml -m command -a "docker ps" --become
+```
+
+Les trois conteneurs `database`, `simple-api` et `httpd` sont `Up`, et seul `httpd` expose `0.0.0.0:80->80/tcp`.
+
+`http://nicolas.estermann.takima.school/departments` renvoie :
+
+```json
+[{"id": 1,"name": "IRC"},{"id": 2,"name": "ETI"},{"id": 3,"name": "CGP"}]
+```

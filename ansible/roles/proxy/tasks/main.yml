@@ -1,0 +1,11 @@
+---
+- name: Run httpd proxy
+  community.docker.docker_container:
+    name: httpd
+    image: "{{ dockerhub_user }}/{{ httpd_image }}:latest"
+    pull: true
+    restart_policy: always
+    networks:
+      - name: app-network
+    published_ports:
+      - "80:80"
