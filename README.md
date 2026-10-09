@@ -118,7 +118,9 @@ Le rôle est créé avec `ansible-galaxy init roles/docker`. Seuls les dossiers 
     creates: /opt/docker_venv
 
 - name: Install Docker SDK for Python in virtual environment
-  command: /opt/docker_venv/bin/pip install docker
+  pip:
+    name: docker
+    virtualenv: /opt/docker_venv
 
 - name: Make sure Docker is running
   service:
@@ -135,7 +137,7 @@ Le rôle est créé avec `ansible-galaxy init roles/docker`. Seuls les dossiers 
 | Install Docker | Installe `docker-ce` |
 | Install Python3 and pip3 | Garantit la présence de Python et pip |
 | Create a virtual environment | Crée un venv dans `/opt/docker_venv`. `creates` rend la tâche idempotente : elle n'est exécutée que si le dossier n'existe pas |
-| Install Docker SDK | Installe le SDK Python `docker` dans le venv, requis par les modules `community.docker` (docker_container, docker_network) |
+| Install Docker SDK | Installe le SDK Python `docker` dans le venv, requis par les modules `community.docker` (docker_container, docker_network). Le module `pip` est utilisé à la place de `command` car il vérifie si le paquet est déjà installé : la tâche est idempotente |
 | Make sure Docker is running | Vérifie que le service Docker est démarré |
 
 ### Exécution
@@ -150,3 +152,5 @@ Vérification :
 ```bash
 ansible all -i inventories/setup.yml -m command -a "docker --version" --become
 ```
+
+Relancé une seconde fois, le playbook renvoie `changed=0` : le rôle est entièrement idempotent.
