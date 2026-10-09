@@ -1,0 +1,12 @@
+.idea/
+*.iml
+out/
+
+id_rsa*
+*.pem
+*.key
+key
+
+*.retry
+.vault_pass*
+.env
