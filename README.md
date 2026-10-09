@@ -333,7 +333,7 @@ Le dossier `ansible/` est ajouté au repo du TP 2 et un job `deploy` est ajouté
 
 | Élément | Rôle |
 |---|---|
-| `needs: build-and-push` | Le déploiement n'a lieu que si les trois images ont été construites et poussées avec succès |
+| `needs: build-and-push` | Le déploiement n'a lieu que si toutes les images de la matrice ont été construites et poussées avec succès |
 | `if: github.ref == 'refs/heads/main'` | Seule la branche `main` est déployée en production, `develop` est testée et buildée mais pas déployée |
 | `SSH_PRIVATE_KEY` | La clé privée est stockée dans les secrets GitHub, jamais dans le repo. Elle est transmise au workflow appelé grâce à `secrets: inherit` dans `main.yml` |
 | `tr -d '\r'` et `printf '%s\n'` | Suppriment les fins de ligne Windows et garantissent le retour à la ligne final, sans quoi OpenSSH refuse la clé (`error in libcrypto`) |
@@ -355,3 +355,90 @@ Pour sécuriser le déploiement :
 - scanner les images (Trivy, OWASP Dependency-Check) et les signer (Cosign) ;
 - protéger la branche `main` (pull request obligatoire, revue de code) ;
 - stocker tous les secrets (clé SSH, mots de passe de la base) dans GitHub Secrets ou Ansible Vault plutôt qu'en clair dans le playbook.
+
+## Front
+
+Le front ([takima-training/devops-front](https://github.com/takima-training/devops-front)) est une application Vue.js servie par nginx. Il est ajouté dans le dossier `front/` du repo, puis buildé, poussé et déployé comme les autres services.
+
+### Routage
+
+Le front possède sa propre route `/departments`, qui entre en conflit avec celle de l'API. L'API est donc déplacée sous `/api/` et le front occupe `/`. httpd reste l'unique point d'entrée et joue le rôle de reverse proxy :
+
+```
+Navigateur ──:80──▶ httpd ─┬─ /api/* ──▶ simple-api:8080
+                           └─ /*     ──▶ front:80
+```
+
+`http-server/my-httpd.conf`
+
+```apache
+ProxyPass /api/ http://simple-api:8080/
+ProxyPassReverse /api/ http://simple-api:8080/
+ProxyPass / http://front:80/
+ProxyPassReverse / http://front:80/
+```
+
+La règle `/api/` est déclarée avant `/`, sinon `/` capturerait toutes les requêtes. Le slash final de `/api/` et de `http://simple-api:8080/` retire le préfixe : `/api/departments` est transmis à l'API comme `/departments`.
+
+### Configuration du front
+
+L'URL de l'API est injectée au moment du build par Vue CLI à partir de `front/.env.production` :
+
+```
+VUE_APP_API_URL=nicolas.estermann.takima.school/api
+```
+
+Le front appelle alors `http://nicolas.estermann.takima.school/api/departments`, requête reçue par httpd puis redirigée vers l'API. Cette valeur étant figée dans le bundle JavaScript, toute modification nécessite de reconstruire l'image.
+
+### CI/CD
+
+Une entrée est ajoutée à la matrice de `build-and-push.yml` :
+
+```yaml
+        include:
+          - { image: simple-api, context: simple-api }
+          - { image: database, context: database }
+          - { image: httpd, context: http-server }
+          - { image: front, context: front }
+```
+
+L'image `tp-devops-front` est construite et poussée sur DockerHub à chaque push. Le job `deploy` dépend de toute la matrice (`needs: build-and-push`), il attend donc la fin des quatre builds avant de déployer.
+
+### Rôle `front`
+
+`ansible/roles/front/tasks/main.yml`
+
+```yaml
+- name: Run front
+  community.docker.docker_container:
+    name: "{{ front_container }}"
+    image: "{{ dockerhub_user }}/{{ front_image }}:latest"
+    pull: true
+    restart_policy: always
+    networks:
+      - name: app-network
+```
+
+Le conteneur n'expose aucun port : il n'est joignable que par httpd via le réseau `app-network`, sous le nom `front`.
+
+Ajouts dans `playbook.yml` :
+
+```yaml
+  vars:
+    front_image: tp-devops-front
+    front_container: front
+  roles:
+    - network
+    - database
+    - app
+    - front
+    - proxy
+```
+
+Le rôle `front` est lancé avant `proxy` pour que httpd trouve ses deux backends au démarrage.
+
+### Vérification
+
+- `http://nicolas.estermann.takima.school/` affiche le front ;
+- `http://nicolas.estermann.takima.school/api/departments` renvoie le JSON de l'API ;
+- la page Departments du front liste IRC, ETI et CGP, ce qui prouve que la chaîne front → httpd → API → base fonctionne.
