@@ -299,3 +299,59 @@ Les trois conteneurs `database`, `simple-api` et `httpd` sont `Up`, et seul `htt
 ```json
 [{"id": 1,"name": "IRC"},{"id": 2,"name": "ETI"},{"id": 3,"name": "CGP"}]
 ```
+
+## Continuous Deployment
+
+Le dossier `ansible/` est ajouté au repo du TP 2 et un job `deploy` est ajouté au workflow `build-and-push.yml`. Chaque push sur `main` enchaîne : tests, build et push des images sur DockerHub, puis déploiement Ansible sur le serveur.
+
+```yaml
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Ansible
+        run: pip install ansible
+
+      - name: Write SSH key
+        run: |
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > key
+          chmod 600 key
+
+      - name: Deploy with Ansible
+        working-directory: ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: ansible-playbook -i inventories/setup.yml playbook.yml -e ansible_ssh_private_key_file=../key
+```
+
+| Élément | Rôle |
+|---|---|
+| `needs: build-and-push` | Le déploiement n'a lieu que si les trois images ont été construites et poussées avec succès |
+| `if: github.ref == 'refs/heads/main'` | Seule la branche `main` est déployée en production, `develop` est testée et buildée mais pas déployée |
+| `SSH_PRIVATE_KEY` | La clé privée est stockée dans les secrets GitHub, jamais dans le repo. Elle est transmise au workflow appelé grâce à `secrets: inherit` dans `main.yml` |
+| `tr -d '\r'` et `printf '%s\n'` | Suppriment les fins de ligne Windows et garantissent le retour à la ligne final, sans quoi OpenSSH refuse la clé (`error in libcrypto`) |
+| `-e ansible_ssh_private_key_file=../key` | Les extra vars ont la priorité la plus haute et remplacent le chemin local défini dans l'inventaire |
+| `ANSIBLE_HOST_KEY_CHECKING: "False"` | Évite la question interactive de confirmation de l'empreinte du serveur, qui bloquerait la CI |
+
+Les conteneurs utilisant `pull: true`, chaque déploiement récupère les images `latest` qui viennent d'être poussées.
+
+### Est-il sûr de déployer automatiquement chaque nouvelle image ?
+
+Non. Une image cassée ou contenant une vulnérabilité partirait directement en production. Si le compte DockerHub ou un secret est compromis, une image malveillante serait déployée sans contrôle. Le tag `latest` ne permet pas non plus de savoir précisément quelle version tourne, ni de revenir facilement en arrière.
+
+Pour sécuriser le déploiement :
+
+- ne déployer qu'après la réussite des tests et de l'analyse qualité (SonarCloud), ce que garantit la chaîne de `needs` ;
+- ne déployer que depuis `main`, idéalement sur un tag de version (`v1.2.0`) ou le SHA du commit plutôt que `latest`, ce qui rend chaque déploiement traçable et permet un rollback ;
+- ajouter une validation manuelle avec les GitHub Environments et des *required reviewers* ;
+- passer par un environnement de staging avant la production ;
+- scanner les images (Trivy, OWASP Dependency-Check) et les signer (Cosign) ;
+- protéger la branche `main` (pull request obligatoire, revue de code) ;
+- stocker tous les secrets (clé SSH, mots de passe de la base) dans GitHub Secrets ou Ansible Vault plutôt qu'en clair dans le playbook.
