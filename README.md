@@ -36,7 +36,7 @@ Le module `setup` récupère les *facts*, des variables découvertes automatique
 ansible all -i inventories/setup.yml -m apt -a "name=apache2 state=absent" --become
 ```
 
-Le module `apt` décrit l'état voulu d'un paquet : `state=absent` signifie qu'Apache ne doit pas être installé. `
+Le module `apt` décrit l'état voulu d'un paquet : `state=absent` signifie qu'Apache ne doit pas être installé.
 
 ## 3-2 Playbook
 
