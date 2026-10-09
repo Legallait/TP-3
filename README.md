@@ -16,7 +16,7 @@ all:
       hosts: nicolas.estermann.takima.school
 ```
 
-L'inventaire indique à Ansible sur quelles machines agir et comment s'y connecter. Le groupe racine `all` définit des variables communes à tous les hôtes : l'utilisateur SSH (`admin`, utilisateur par défaut sur Debian) et le chemin de la clé privée. Plus besoin de passer `-u` et `--private-key` à chaque commande. Le sous-groupe `prod` contient le serveur. On pourrait ajouter d'autres groupes (database, front, staging...) pour cibler des machines différentes.
+L'inventaire indique à Ansible sur quelles machines agir et comment s'y connecter. Le groupe racine `all` définit des variables communes à tous les hôtes : l'utilisateur SSH (`admin`, utilisateur par défaut sur Debian) et le chemin de la clé privée. Plus besoin de passer `-u` et `--private-key` à chaque commande. Le sous-groupe `prod` contient le serveur.
 
 ### Commandes de base
 
@@ -30,13 +30,13 @@ Vérifie qu'Ansible peut se connecter en SSH, s'authentifier et exécuter Python
 ansible all -i inventories/setup.yml -m setup -a "filter=ansible_distribution*"
 ```
 
-Le module `setup` récupère les *facts*, des variables découvertes automatiquement sur l'hôte et préfixées par `ansible_`. Le filtre ne garde que les informations sur l'OS (Debian et sa version).
+Le module `setup` récupère les *facts*, des variables découvertes automatiquement sur l'hôte et préfixées par `ansible_`. 
 
 ```bash
 ansible all -i inventories/setup.yml -m apt -a "name=apache2 state=absent" --become
 ```
 
-Le module `apt` décrit l'état voulu d'un paquet : `state=absent` signifie qu'Apache ne doit pas être installé. `--become` exécute la commande en root, nécessaire pour gérer les paquets. Au premier lancement, la commande renvoie `changed: true` (Apache est supprimé). Au second, `changed: false` (l'état voulu est déjà atteint). C'est l'**idempotence** : on décrit un état cible, pas une suite d'actions.
+Le module `apt` décrit l'état voulu d'un paquet : `state=absent` signifie qu'Apache ne doit pas être installé. `
 
 ## 3-2 Playbook
 
@@ -209,8 +209,6 @@ Le playbook est découpé en deux plays :
 - le premier installe Docker avec le Python système, nécessaire au module `apt` ;
 - le second utilise `ansible_python_interpreter: /opt/docker_venv/bin/python`, car les modules `community.docker` ont besoin du SDK Python `docker`, installé dans le venv.
 
-Toutes les valeurs (images, noms de conteneurs, identifiants) sont centralisées dans `vars` et réutilisées dans les rôles avec la syntaxe Jinja2 `{{ variable }}`.
-
 ### Rôle `network`
 
 ```yaml
@@ -219,7 +217,7 @@ Toutes les valeurs (images, noms de conteneurs, identifiants) sont centralisées
     name: app-network
 ```
 
-Crée un réseau Docker dédié. Les conteneurs connectés à ce réseau se joignent par leur nom (DNS interne de Docker) : l'API contacte `database`, le proxy contacte `simple-api`.
+Crée un réseau Docker dédié. Les conteneurs connectés à ce réseau se joignent par leur nom : l'API contacte `database`, le proxy contacte `simple-api`.
 
 ### Rôle `database`
 
@@ -303,6 +301,7 @@ Les trois conteneurs `database`, `simple-api` et `httpd` sont `Up`, et seul `htt
 ## Continuous Deployment
 
 Le dossier `ansible/` est ajouté au repo du TP 2 et un job `deploy` est ajouté au workflow `build-and-push.yml`. Chaque push sur `main` enchaîne : tests, build et push des images sur DockerHub, puis déploiement Ansible sur le serveur.
+Repo GitHub (CI/CD et déploiement) : [Legallait/TP2_git](https://github.com/Legallait/TP2_git)
 
 ```yaml
   deploy:
@@ -344,21 +343,12 @@ Les conteneurs utilisant `pull: true`, chaque déploiement récupère les images
 
 ### Est-il sûr de déployer automatiquement chaque nouvelle image ?
 
-Non. Une image cassée ou contenant une vulnérabilité partirait directement en production. Si le compte DockerHub ou un secret est compromis, une image malveillante serait déployée sans contrôle. Le tag `latest` ne permet pas non plus de savoir précisément quelle version tourne, ni de revenir facilement en arrière.
-
-Pour sécuriser le déploiement :
-
-- ne déployer qu'après la réussite des tests et de l'analyse qualité (SonarCloud), ce que garantit la chaîne de `needs` ;
-- ne déployer que depuis `main`, idéalement sur un tag de version (`v1.2.0`) ou le SHA du commit plutôt que `latest`, ce qui rend chaque déploiement traçable et permet un rollback ;
-- ajouter une validation manuelle avec les GitHub Environments et des *required reviewers* ;
-- passer par un environnement de staging avant la production ;
-- scanner les images (Trivy, OWASP Dependency-Check) et les signer (Cosign) ;
-- protéger la branche `main` (pull request obligatoire, revue de code) ;
-- stocker tous les secrets (clé SSH, mots de passe de la base) dans GitHub Secrets ou Ansible Vault plutôt qu'en clair dans le playbook.
+Non. Une image cassée ou contenant une vulnérabilité partirait directement en production. 
+Si le compte DockerHub ou un secret est compromis, une image malveillante serait déployée sans contrôle. 
 
 ## Front
 
-Le front ([takima-training/devops-front](https://github.com/takima-training/devops-front)) est une application Vue.js servie par nginx. Il est ajouté dans le dossier `front/` du repo, puis buildé, poussé et déployé comme les autres services.
+Le front ([takima-training/devops-front](https://github.com/takima-training/devops-front)) est ajouté dans le dossier `front/` du repo, puis buildé, poussé et déployé comme les autres services.
 
 ### Routage
 
@@ -388,7 +378,7 @@ L'URL de l'API est injectée au moment du build par Vue CLI à partir de `front/
 VUE_APP_API_URL=nicolas.estermann.takima.school/api
 ```
 
-Le front appelle alors `http://nicolas.estermann.takima.school/api/departments`, requête reçue par httpd puis redirigée vers l'API. Cette valeur étant figée dans le bundle JavaScript, toute modification nécessite de reconstruire l'image.
+Le front appelle alors `http://nicolas.estermann.takima.school/api/departments`, requête reçue par httpd puis redirigée vers l'API.
 
 ### CI/CD
 
@@ -445,7 +435,7 @@ Le rôle `front` est lancé avant `proxy` pour que httpd trouve ses deux backend
 
 ## Going Further : Continuous Deployment avec Ansible Vault
 
-Jusqu'ici, les identifiants de la base étaient écrits en clair dans `playbook.yml`, donc visibles par toute personne ayant accès au repo. Ansible Vault chiffre ces secrets en AES-256 dans un fichier qui peut être commit sans risque. Ansible le déchiffre à l'exécution grâce à un mot de passe de vault, qui n'est jamais stocké dans le repo.
+Jusqu'ici, les identifiants de la base étaient écrits en clair dans `playbook.yml`, donc visibles par toute personne ayant accès au repo. 
 
 ### Fichier de secrets
 
@@ -463,8 +453,6 @@ ansible-vault encrypt group_vars/all/vault.yml
 ```
 
 Une fois chiffré, le fichier commence par `$ANSIBLE_VAULT;1.1;AES256` suivi du contenu chiffré, illisible sans le mot de passe. Pour le consulter ou le modifier : `ansible-vault view` et `ansible-vault edit`.
-
-Le dossier `group_vars/all/` est chargé automatiquement par Ansible pour tous les hôtes, car il se trouve à côté du playbook : aucune option supplémentaire n'est nécessaire pour l'inclure.
 
 ### Utilisation dans le playbook
 
@@ -508,3 +496,257 @@ Le mot de passe de vault est stocké dans le secret GitHub `ANSIBLE_VAULT_PASSWO
 | `chmod 600` | Restreint la lecture du fichier au seul utilisateur du runner |
 | `--vault-password-file` | Fournit le mot de passe sans interaction, indispensable en CI |
 | `.gitignore` (`.vault_pass*`) | Empêche de commit un fichier de mot de passe par erreur en local |
+
+## Bonus 1 : Load balancing de l'API
+
+L'API tourne désormais en plusieurs instances, et httpd répartit les requêtes entre elles. Si une instance tombe, les autres continuent de répondre.
+
+```
+Navigateur ──:80──▶ httpd ─┬─ /api/* ──▶ balancer://api ─┬─▶ simple-api-1:8080
+                           │                              └─▶ simple-api-2:8080
+                           └─ /*     ──▶ front:80
+```
+
+### Rôle `app` : plusieurs instances
+
+`ansible/roles/app/tasks/main.yml`
+
+```yaml
+- name: Run backend API instances
+  community.docker.docker_container:
+    name: "{{ api_container }}-{{ item }}"
+    image: "{{ dockerhub_user }}/{{ api_image }}:latest"
+    pull: true
+    restart_policy: always
+    networks:
+      - name: app-network
+    env:
+      DATABASE_HOST: "{{ db_container }}"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://{{ db_container }}:5432/{{ db_name }}"
+      SPRING_DATASOURCE_USERNAME: "{{ db_user }}"
+      SPRING_DATASOURCE_PASSWORD: "{{ db_password }}"
+  loop: "{{ range(1, api_replicas + 1) | list }}"
+
+- name: Remove old single API container
+  community.docker.docker_container:
+    name: "{{ api_container }}"
+    state: absent
+```
+
+Avec `api_replicas: 2` dans les `vars` du playbook, la boucle `loop` crée `simple-api-1` et `simple-api-2`.
+
+### Configuration httpd
+
+`http-server/my-httpd.conf`
+
+```apache
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_http_module modules/mod_proxy_http.so
+LoadModule proxy_balancer_module modules/mod_proxy_balancer.so
+LoadModule lbmethod_byrequests_module modules/mod_lbmethod_byrequests.so
+LoadModule slotmem_shm_module modules/mod_slotmem_shm.so
+
+<VirtualHost *:80>
+ProxyPreserveHost On
+
+<Proxy "balancer://api">
+    BalancerMember http://simple-api-1:8080
+    BalancerMember http://simple-api-2:8080
+    ProxySet lbmethod=byrequests
+</Proxy>
+
+ProxyPass /api/ balancer://api/
+ProxyPassReverse /api/ balancer://api/
+ProxyPass / http://front:80/
+ProxyPassReverse / http://front:80/
+</VirtualHost>
+```
+
+| Élément | Rôle |
+|---|---|
+| `mod_proxy_balancer` | Permet de définir un groupe de backends `balancer://` |
+| `mod_lbmethod_byrequests` | Algorithme de répartition *round robin* : les requêtes sont distribuées à tour de rôle |
+| `mod_slotmem_shm` | Mémoire partagée utilisée par le balancer pour suivre l'état des membres |
+| `BalancerMember` | Une instance de l'API, joignable par son nom sur `app-network` |
+| `ProxySet lbmethod=byrequests` | Choix de l'algorithme. Alternatives : `bybusyness` (instance la moins occupée) ou `bytraffic` (volume de données) |
+
+### Vérification
+
+```bash
+ansible all -i inventories/setup.yml -m command -a "docker ps" --become --ask-vault-pass
+```
+
+`simple-api-1` et `simple-api-2` sont `Up`. Après plusieurs appels à `/api/departments`, les requêtes apparaissent dans les logs des deux instances. En arrêtant une instance (`docker stop simple-api-1`), l'API continue de répondre grâce à la seconde.
+
+## Bonus 2 : Centralisation des logs avec Grafana, Loki et Alloy
+
+Sans outil dédié, consulter les logs impose de se connecter au serveur et de lancer `docker logs` conteneur par conteneur. Avec plusieurs instances de l'API, cela devient vite ingérable. 
+Grafana centralise les logs de tous les conteneurs et permet de les filtrer depuis une interface web.
+
+```
+Conteneurs ──▶ Alloy ──▶ Loki ──▶ Grafana ◀── navigateur (/grafana/)
+ (stdout)    (collecte) (stockage) (affichage)
+```
+
+| Composant | Rôle |
+|---|---|
+| **Alloy** | Agent de collecte. Découvre les conteneurs via le socket Docker et envoie leurs logs à Loki. Successeur de Promtail |
+| **Loki** | Base de logs. Indexe les logs par labels (`container`, `job`) plutôt que par contenu, ce qui la rend légère |
+| **Grafana** | Interface de visualisation. Interroge Loki avec le langage LogQL |
+
+### Rôle `monitoring`
+
+```
+ansible/roles/monitoring/
+├── files/
+│   ├── config.alloy
+│   └── datasources.yml
+└── tasks/
+    └── main.yml
+```
+
+`files/config.alloy`
+
+```
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+discovery.relabel "containers" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+}
+
+loki.source.docker "default" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.containers.output
+  labels     = { "job" = "docker" }
+  forward_to = [loki.write.default.receiver]
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+```
+
+Alloy découvre tous les conteneurs, transforme leur nom Docker (`/simple-api-1`) en label `container="simple-api-1"`, lit leurs logs et les pousse vers Loki.
+
+`files/datasources.yml`
+
+```yaml
+apiVersion: 1
+datasources:
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: true
+```
+
+Ce fichier de *provisioning* connecte automatiquement Grafana à Loki au démarrage, sans configuration manuelle dans l'interface.
+
+`tasks/main.yml`
+
+```yaml
+- name: Create monitoring config directory
+  file:
+    path: /opt/monitoring
+    state: directory
+
+- name: Copy Alloy config
+  copy:
+    src: config.alloy
+    dest: /opt/monitoring/config.alloy
+
+- name: Copy Grafana datasource
+  copy:
+    src: datasources.yml
+    dest: /opt/monitoring/datasources.yml
+
+- name: Run Loki
+  community.docker.docker_container:
+    name: loki
+    image: grafana/loki:latest
+    restart_policy: always
+    networks:
+      - name: app-network
+    volumes:
+      - loki-data:/loki
+
+- name: Run Alloy
+  community.docker.docker_container:
+    name: alloy
+    image: grafana/alloy:latest
+    restart_policy: always
+    command: run /etc/alloy/config.alloy
+    networks:
+      - name: app-network
+    volumes:
+      - /opt/monitoring/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+- name: Run Grafana
+  community.docker.docker_container:
+    name: grafana
+    image: grafana/grafana:latest
+    restart_policy: always
+    networks:
+      - name: app-network
+    env:
+      GF_SECURITY_ADMIN_PASSWORD: "{{ vault_grafana_password }}"
+      GF_SERVER_ROOT_URL: "http://nicolas.estermann.takima.school/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - /opt/monitoring/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - grafana-data:/var/lib/grafana
+```
+
+| Élément | Rôle |
+|---|---|
+| `copy` | Dépose les fichiers de configuration du rôle sur le serveur, montés ensuite dans les conteneurs |
+| `/var/run/docker.sock:ro` | Donne à Alloy un accès en lecture seule à l'API Docker pour découvrir les conteneurs et lire leurs logs |
+| `loki-data`, `grafana-data` | Volumes nommés : les logs et la configuration Grafana survivent aux redéploiements |
+| `vault_grafana_password` | Mot de passe admin de Grafana, stocké chiffré dans le vault avec les autres secrets |
+| `GF_SERVER_SERVE_FROM_SUB_PATH` | Permet à Grafana de fonctionner derrière httpd sous le chemin `/grafana/` |
+
+
+### Exposition via httpd
+
+Dans le `VirtualHost`, avant la règle `/` :
+
+```apache
+ProxyPass /grafana/ http://grafana:3000/grafana/
+ProxyPassReverse /grafana/ http://grafana:3000/grafana/
+```
+
+### Playbook
+
+```yaml
+  roles:
+    - network
+    - database
+    - app
+    - front
+    - monitoring
+    - proxy
+```
+
+### Utilisation
+
+Grafana est accessible sur `http://nicolas.estermann.takima.school/grafana/` (utilisateur `admin`). Dans **Explore**, avec la source Loki, quelques requêtes LogQL :
+
+| Requête | Résultat |
+|---|---|
+| `{container="simple-api-1"}` | Logs d'une instance de l'API |
+| `{container=~"simple-api-.*"}` | Logs des deux instances, ce qui permet d'observer le load balancing |
+| `{container="httpd"} \|= "500"` | Requêtes ayant renvoyé une erreur 500 |
+| `{job="docker"} \|= "ERROR"` | Toutes les erreurs, tous conteneurs confondus |
+
+Les deux bonus se complètent : le load balancing multiplie les instances, et Grafana permet de suivre leur activité à un seul endroit.
