@@ -442,3 +442,69 @@ Le rôle `front` est lancé avant `proxy` pour que httpd trouve ses deux backend
 - `http://nicolas.estermann.takima.school/` affiche le front ;
 - `http://nicolas.estermann.takima.school/api/departments` renvoie le JSON de l'API ;
 - la page Departments du front liste IRC, ETI et CGP, ce qui prouve que la chaîne front → httpd → API → base fonctionne.
+
+## Going Further : Continuous Deployment avec Ansible Vault
+
+Jusqu'ici, les identifiants de la base étaient écrits en clair dans `playbook.yml`, donc visibles par toute personne ayant accès au repo. Ansible Vault chiffre ces secrets en AES-256 dans un fichier qui peut être commit sans risque. Ansible le déchiffre à l'exécution grâce à un mot de passe de vault, qui n'est jamais stocké dans le repo.
+
+### Fichier de secrets
+
+`ansible/group_vars/all/vault.yml`, avant chiffrement :
+
+```yaml
+vault_db_user: usr
+vault_db_password: pwd
+```
+
+Chiffrement :
+
+```bash
+ansible-vault encrypt group_vars/all/vault.yml
+```
+
+Une fois chiffré, le fichier commence par `$ANSIBLE_VAULT;1.1;AES256` suivi du contenu chiffré, illisible sans le mot de passe. Pour le consulter ou le modifier : `ansible-vault view` et `ansible-vault edit`.
+
+Le dossier `group_vars/all/` est chargé automatiquement par Ansible pour tous les hôtes, car il se trouve à côté du playbook : aucune option supplémentaire n'est nécessaire pour l'inclure.
+
+### Utilisation dans le playbook
+
+```yaml
+  vars:
+    db_user: "{{ vault_db_user }}"
+    db_password: "{{ vault_db_password }}"
+```
+
+Les rôles continuent d'utiliser `db_user` et `db_password` sans aucune modification. Le préfixe `vault_` est la convention recommandée par la documentation Ansible : il indique que la valeur vient du fichier chiffré, et on retrouve facilement où une variable est définie avec un simple `grep`, alors que le contenu du vault, lui, n'est pas lisible.
+
+### Exécution en local
+
+```bash
+ansible-playbook -i inventories/setup.yml playbook.yml --ask-vault-pass
+```
+
+### Intégration dans la CI
+
+Le mot de passe de vault est stocké dans le secret GitHub `ANSIBLE_VAULT_PASSWORD`. Le job `deploy` l'écrit dans un fichier temporaire sur le runner et le passe à Ansible :
+
+```yaml
+      - name: Write SSH key and vault password
+        run: |
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > key
+          chmod 600 key
+          printf '%s' "${{ secrets.ANSIBLE_VAULT_PASSWORD }}" > vault_pass
+          chmod 600 vault_pass
+
+      - name: Deploy with Ansible
+        working-directory: ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: ansible-playbook -i inventories/setup.yml playbook.yml -e ansible_ssh_private_key_file=../key --vault-password-file ../vault_pass
+```
+
+| Élément | Rôle |
+|---|---|
+| `ANSIBLE_VAULT_PASSWORD` | Mot de passe de vault, stocké uniquement dans les secrets GitHub et masqué dans les logs |
+| `printf '%s'` | Écrit le mot de passe sans retour à la ligne final, qui ferait partie du mot de passe |
+| `chmod 600` | Restreint la lecture du fichier au seul utilisateur du runner |
+| `--vault-password-file` | Fournit le mot de passe sans interaction, indispensable en CI |
+| `.gitignore` (`.vault_pass*`) | Empêche de commit un fichier de mot de passe par erreur en local |
